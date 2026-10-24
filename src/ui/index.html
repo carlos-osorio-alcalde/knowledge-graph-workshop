@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ontology assistant</title>
+    <style>
+      body {
+        max-width: 48rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        font: 1rem/1.5 system-ui, sans-serif;
+      }
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 7rem;
+        margin: 0.5rem 0;
+        padding: 0.75rem;
+        font: inherit;
+      }
+      button { padding: 0.5rem 1rem; font: inherit; }
+      #answer { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Ontology assistant</h1>
+    <form id="question-form">
+      <label for="question">Ask a question about the ontology</label>
+      <textarea id="question" required></textarea>
+      <button type="submit">Ask</button>
+    </form>
+    <p id="status" role="status"></p>
+    <section aria-live="polite">
+      <h2>Answer</h2>
+      <p id="answer"></p>
+    </section>
+    <script>
+      const form = document.querySelector("#question-form");
+      const questionInput = document.querySelector("#question");
+      const status = document.querySelector("#status");
+      const answer = document.querySelector("#answer");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "Asking...";
+        answer.textContent = "";
+
+        try {
+          const response = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: questionInput.value })
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.error || `Request failed (${response.status})`);
+          }
+          answer.textContent = result.answer;
+          status.textContent = "";
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      });
+    </script>
+  </body>
+</html>

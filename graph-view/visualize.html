@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Turtle / OWL Graph Viewer</title>
+<script src="vis-network.min.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; font-family: -apple-system, Segoe UI, Arial, sans-serif; }
+  #toolbar {
+    padding: 10px 14px;
+    background: #1f2937;
+    color: #f3f4f6;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  #toolbar h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
+  #toolbar label { font-size: 13px; }
+  #status { font-size: 13px; color: #9ca3af; }
+  #network { width: 100%; height: calc(100% - 52px); background: #fafafa; }
+  #error { color: #b91c1c; font-size: 13px; }
+  input[type=file] { color: #f3f4f6; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>Turtle / OWL Graph Viewer</h1>
+  <input type="file" id="fileInput" accept=".ttl,.turtle,text/turtle" />
+  <label><input type="checkbox" id="showSchema" checked /> schema (classes &amp; properties)</label>
+  <label><input type="checkbox" id="showData" checked /> instance data</label>
+  <span id="status">Choose a .ttl file to visualize.</span>
+  <span id="error"></span>
+</div>
+<div id="network"></div>
+
+<script>
+// -------------------------------------------------------------------------
+// Minimal Turtle parser: @prefix, IRIs, prefixed names, literals (with
+// @lang / ^^datatype), the "a" shorthand, and ; / , statement grouping.
+// No blank nodes or collections - not needed for hand-written ontology files.
+// -------------------------------------------------------------------------
+
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
+const OWL = 'http://www.w3.org/2002/07/owl#';
+const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+const TOKEN_RE = new RegExp([
+  '#[^\\n]*',
+  '"""(?:[^\\\\]|\\\\.)*?"""',
+  '"(?:[^"\\\\]|\\\\.)*"',
+  '<[^>]*>',
+  '\\\\^[\\w-]*:[\\w.-]+',
+  '\\\\^<[^>]*>',
+  '@[a-zA-Z][a-zA-Z-]*',
+  '[\\w-]*:[\\w.-]+',
+  '[\\w-]*:',
+  '[.,;]',
+  '-?\\d+\\.\\d+',
+  '-?\\d+',
+  '[A-Za-z_][\\w-]*',
+].join('|'), 'g');
+
+function tokenize(text) {
+  const tokens = [];
+  let m;
+  TOKEN_RE.lastIndex = 0;
+  while ((m = TOKEN_RE.exec(text)) !== null) {
+    if (!m[0].startsWith('#')) tokens.push(m[0]);
+  }
+  return tokens;
+}
+
+function parseTurtle(text) {
+  const tokens = tokenize(text);
+  const prefixes = {};
+  const triples = [];
+  let i = 0;
+
+  function resolve(prefixedName) {
+    const idx = prefixedName.indexOf(':');
+    const prefix = prefixedName.slice(0, idx);
+    const local = prefixedName.slice(idx + 1);
+    if (!(prefix in prefixes)) throw new Error('Unknown prefix "' + prefix + ':" used before it was declared.');
+    return prefixes[prefix] + local;
+  }
+
+  function readTerm() {
+    const tok = tokens[i];
+    if (tok === undefined) throw new Error('Unexpected end of file while parsing a statement.');
+    if (tok.startsWith('<')) { i++; return { type: 'iri', value: tok.slice(1, -1) }; }
+    if (tok === 'a') { i++; return { type: 'iri', value: RDF_TYPE }; }
+    if (tok.startsWith('"')) {
+      i++;
+      const quoteLen = tok.startsWith('"""') ? 3 : 1;
+      let value = tok.slice(quoteLen, tok.length - quoteLen);
+      value = value.replace(/\\(.)/g, (_, c) => ({ n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\' }[c] || c));
+      let lang = null, datatype = null;
+      const next = tokens[i];
+      if (next && next.startsWith('@')) { lang = next.slice(1); i++; }
+      else if (next && next.startsWith('^^')) {
+        const dtTok = next.slice(2);
+        datatype = dtTok.startsWith('<') ? dtTok.slice(1, -1) : resolve(dtTok);
+        i++;
+      }
+      return { type: 'literal', value, lang, datatype };
+    }
+    if (/^-?\d+\.\d+$/.test(tok)) { i++; return { type: 'literal', value: tok, lang: null, datatype: XSD + 'decimal' }; }
+    if (/^-?\d+$/.test(tok)) { i++; return { type: 'literal', value: tok, lang: null, datatype: XSD + 'integer' }; }
+    if (tok.includes(':')) { i++; return { type: 'iri', value: resolve(tok) }; }
+    throw new Error('Unexpected token "' + tok + '".');
+  }
+
+  while (i < tokens.length) {
+    if (tokens[i] === '@prefix' || tokens[i] === '@base') {
+      const isBase = tokens[i] === '@base';
+      i++;
+      if (isBase) {
+        i++; // IRI
+        if (tokens[i] === '.') i++;
+        continue;
+      }
+      const label = tokens[i]; i++;      // e.g. "ex:" or ":"
+      const iriTok = tokens[i]; i++;     // <...>
+      prefixes[label.slice(0, -1)] = iriTok.slice(1, -1);
+      if (tokens[i] === '.') i++;
+      continue;
+    }
+    const subject = readTerm();
+    while (true) {
+      const predicate = readTerm();
+      let object = readTerm();
+      triples.push({ subject, predicate, object });
+      while (tokens[i] === ',') {
+        i++;
+        object = readTerm();
+        triples.push({ subject, predicate, object });
+      }
+      if (tokens[i] === ';') { i++; if (tokens[i] === '.') { i++; break; } continue; }
+      if (tokens[i] === '.') { i++; break; }
+      break; // tolerate EOF without trailing '.'
+    }
+  }
+  return triples;
+}
+
+// -------------------------------------------------------------------------
+// Turtle triples -> vis-network nodes/edges.
+//
+// Resources (IRIs) become nodes. Literal-valued triples become attributes
+// shown in a node's tooltip rather than nodes of their own, so dates, prices
+// and IDs don't clutter the layout. rdf:type to a schema element (owl:Class,
+// owl:ObjectProperty, owl:DatatypeProperty, owl:Ontology) sets the node's
+// kind instead of drawing an edge, so the graph isn't swamped with "a
+// owl:Class" lines pointing at a shared hub.
+// -------------------------------------------------------------------------
+
+const SCHEMA_TYPES = new Set([OWL + 'Class', OWL + 'ObjectProperty', OWL + 'DatatypeProperty', OWL + 'Ontology']);
+
+function localName(iri) {
+  const m = /[#\/]([^#\/]+)$/.exec(iri);
+  return m ? m[1] : iri;
+}
+
+function buildGraph(triples) {
+  const nodes = new Map(); // iri -> { id, label, kind, group, attrs: {}, comment }
+  const edges = [];
+
+  function node(iri) {
+    if (!nodes.has(iri)) {
+      nodes.set(iri, { id: iri, label: localName(iri), kind: 'resource', group: null, attrs: {}, comment: null });
+    }
+    return nodes.get(iri);
+  }
+
+  for (const t of triples) {
+    if (t.subject.type !== 'iri') continue; // subjects are always resources in this subset
+    const subj = node(t.subject.value);
+    const pred = t.predicate.value;
+
+    if (t.object.type === 'literal') {
+      if (pred === RDFS + 'label') subj.label = t.object.value;
+      else if (pred === RDFS + 'comment') subj.comment = t.object.value;
+      else subj.attrs[localName(pred)] = t.object.value;
+      continue;
+    }
+
+    // object is an IRI
+    if (pred === RDF_TYPE) {
+      if (SCHEMA_TYPES.has(t.object.value)) {
+        subj.kind = localName(t.object.value); // Class / ObjectProperty / DatatypeProperty / Ontology
+      } else {
+        const typeNode = node(t.object.value);
+        if (!subj.group) subj.group = typeNode.label; // colour instances by their class
+        edges.push({ from: subj.id, to: t.object.value, label: 'a', dashes: true, kind: 'type' });
+      }
+      continue;
+    }
+
+    const obj = node(t.object.value);
+    const edgeKind = (pred === RDFS + 'domain' || pred === RDFS + 'range' || pred === RDFS + 'subClassOf')
+      ? 'schema' : 'data';
+    edges.push({ from: subj.id, to: obj.id, label: localName(pred), kind: edgeKind });
+  }
+
+  return { nodes: [...nodes.values()], edges };
+}
+
+// -------------------------------------------------------------------------
+// Rendering
+// -------------------------------------------------------------------------
+
+const KIND_STYLE = {
+  Class:            { shape: 'box',     color: '#bfdbfe', font: { color: '#1e3a8a' } },
+  ObjectProperty:   { shape: 'diamond', color: '#fde68a', font: { color: '#78350f' } },
+  DatatypeProperty: { shape: 'diamond', color: '#fed7aa', font: { color: '#7c2d12' } },
+  Ontology:         { shape: 'star',    color: '#e5e7eb', font: { color: '#374151' } },
+  resource:         { shape: 'dot',     size: 14 },
+};
+
+let network = null;
+
+function render(graph) {
+  const showSchema = document.getElementById('showSchema').checked;
+  const showData = document.getElementById('showData').checked;
+
+  const isSchemaKind = k => k === 'Class' || k === 'ObjectProperty' || k === 'DatatypeProperty' || k === 'Ontology';
+
+  const visibleNodes = graph.nodes.filter(n => isSchemaKind(n.kind) ? showSchema : showData);
+  const visibleIds = new Set(visibleNodes.map(n => n.id));
+  const visibleEdges = graph.edges.filter(e => {
+    if (e.kind === 'schema' && !showSchema) return false;
+    return visibleIds.has(e.from) && visibleIds.has(e.to);
+  });
+
+  const nodeItems = visibleNodes.map(n => {
+    const style = KIND_STYLE[n.kind] || KIND_STYLE.resource;
+    const attrLines = Object.entries(n.attrs).map(([k, v]) => k + ': ' + v).join('\n');
+    const title = [n.comment, attrLines].filter(Boolean).join('\n\n');
+    return Object.assign({ id: n.id, label: n.label, title: title || n.label, group: n.kind === 'resource' ? n.group : n.kind }, style);
+  });
+
+  const edgeItems = visibleEdges.map((e, idx) => ({
+    id: idx,
+    from: e.from,
+    to: e.to,
+    label: e.label,
+    dashes: !!e.dashes || e.kind === 'schema',
+    arrows: 'to',
+    font: { size: 10, align: 'top' },
+    color: e.kind === 'schema' ? { color: '#9ca3af' } : { color: '#6b7280' },
+  }));
+
+  const data = {
+    nodes: new vis.DataSet(nodeItems),
+    edges: new vis.DataSet(edgeItems),
+  };
+
+  const options = {
+    physics: { solver: 'forceAtlas2Based', stabilization: { iterations: 150 } },
+    interaction: { hover: true, tooltipDelay: 150 },
+    nodes: { font: { size: 13 } },
+  };
+
+  if (network) network.destroy();
+  network = new vis.Network(document.getElementById('network'), data, options);
+}
+
+let currentGraph = null;
+
+document.getElementById('fileInput').addEventListener('change', (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const errorEl = document.getElementById('error');
+    const statusEl = document.getElementById('status');
+    errorEl.textContent = '';
+    try {
+      const triples = parseTurtle(reader.result);
+      currentGraph = buildGraph(triples);
+      render(currentGraph);
+      statusEl.textContent = file.name + ' - ' + triples.length + ' triples, ' + currentGraph.nodes.length + ' nodes.';
+    } catch (err) {
+      statusEl.textContent = '';
+      errorEl.textContent = 'Could not parse ' + file.name + ': ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('showSchema').addEventListener('change', () => currentGraph && render(currentGraph));
+document.getElementById('showData').addEventListener('change', () => currentGraph && render(currentGraph));
+</script>
+</body>
+</html>

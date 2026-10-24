@@ -1,0 +1,284 @@
+# Practice ontology - a supermarket (retail) domain
+# Scratch file for learning OWL/RDF, built by hand step by step.
+
+@prefix :     <https://example.org/smarket/> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://example.org/smarket/>
+    a owl:Ontology ;
+    rdfs:label "Smarket practice ontology"@en ; 
+    rdfs:comment "Learning file."@en ;
+    owl:versionInfo "0.1.0" .
+
+#-----------------------------------------------------------------------------    
+# Classes
+#-----------------------------------------------------------------------------    
+
+# Stores
+
+:Store
+    a owl:Class ;
+    rdfs:label "Store"@en ;
+    rdfs:comment "A single retail location, identified by a store ID."@en .
+
+:Division
+    a owl:Class ;
+    rdfs:label "Division"@en ;
+    rdfs:comment "A geographic region a store is located in, e.g. North, South, Southeast."@en .
+
+:PriceZone
+    a owl:Class ;
+    rdfs:label "Price zone"@en ;
+    rdfs:comment "A pricing region. Each store is assigned to one price zone, independent of its division."@en .
+
+:StoreCategory
+    a owl:Class ;
+    rdfs:label "Store category"@en ;
+    rdfs:comment "The service tier of a store, e.g. Premium or Regular (as with Starbucks vs. Starbucks Reserve)."@en .
+
+# Products
+
+:Item
+    a owl:Class ;
+    rdfs:label "Item"@en ;
+    rdfs:comment "A product that can be sold, identified by an item ID. Not a physical unit: 'Whole milk 1L' is one item, however many cartons are on the shelf."@en .
+
+:Group
+    a owl:Class ;
+    rdfs:label "Group"@en ;
+    rdfs:comment "A merchandising group an item belongs to, e.g. Pastries, Dairy, Produce, Meat."@en .
+
+:Category
+    a owl:Class ;
+    rdfs:label "Category"@en ;
+    rdfs:comment "A broad product category a group belongs to, e.g. Food, Beverages, Cleaning Supplies."@en .
+
+# Pricing
+
+:PriceEntry
+    a owl:Class ;
+    rdfs:label "Price entry"@en ;
+    rdfs:comment "The regular price of one item in one price zone. Exists because a price depends on an (item, price zone) pair, not on either alone."@en .
+
+:PromoPriceEntry
+    a owl:Class ;
+    rdfs:label "Promo price entry"@en ;
+    rdfs:comment "The price of one item under one promo in one price zone."@en .
+
+# Promotions
+
+:Promo
+    a owl:Class ;
+    rdfs:label "Promotion"@en ;
+    rdfs:comment "A promotional campaign, identified by a promo ID, e.g. a percent-off or buy-one-get-one deal."@en .
+
+# Customers and orders
+
+:Customer
+    a owl:Class ;
+    rdfs:label "Customer"@en ;
+    rdfs:comment "A person who places orders, identified by a customer ID."@en .
+
+:Order
+    a owl:Class ; 
+    rdfs:label "Order"@en ;
+    rdfs:comment "One purchase made by a customer at a store on a given date. May cover several order lines."@en .
+
+:OrderLine
+    a owl:Class ;
+    rdfs:label "Order line"@en ;
+    rdfs:comment "One item and quantity within an order, optionally bought under a promo."@en .
+
+#----------------------------------------------------------------------------- 
+# Subclasses
+#----------------------------------------------------------------------------- 
+
+:PercentOffPromo
+    a owl:Class ; 
+    rdfs:subClassOf :Promo ;
+    rdfs:label "Percent-off promo"@en ;
+    rdfs:comment "A promo that takes a percentage off the regular price, e.g. 20% off."@en .
+
+:BogoPromo
+    a owl:Class ; 
+    rdfs:subClassOf :Promo ;
+    rdfs:label "Buy-one-get-one promo"@en ;
+    rdfs:comment "A promo where buying one unit of the item earns a second unit free."@en .
+
+:BuyOneGetHalfOffPromo
+    a owl:Class ; 
+    rdfs:subClassOf :Promo ;
+    rdfs:label "Buy-one-get-50%-off promo"@en ;
+    rdfs:comment "A promo where buying one unit of the item earns a second unit at half price."@en .
+
+#-----------------------------------------------------------------------------     
+# Relationships (object properties)
+#----------------------------------------------------------------------------- 
+
+# Store relationships
+
+:locatedInDivision
+    a owl:ObjectProperty ; 
+    rdfs:domain :Store ; 
+    rdfs:range :Division ;
+    rdfs:label "located in division"@en ;
+    rdfs:comment "The division a store is located in."@en .
+
+:inPriceZone
+    a owl:ObjectProperty ; 
+    rdfs:domain :Store ; 
+    rdfs:range :PriceZone ;
+    rdfs:label "in price zone"@en ;
+    rdfs:comment "The price zone a store's prices are drawn from."@en .
+
+:hasStoreCategory
+    a owl:ObjectProperty ; 
+    rdfs:domain :Store ;
+    rdfs:range :StoreCategory ;
+    rdfs:label "has store category"@en ;
+    rdfs:comment "The service tier of a store."@en .
+   
+# Product relationships
+
+:belongsToGroup
+    a owl:ObjectProperty ; 
+    rdfs:domain :Item ; 
+    rdfs:range :Group ;
+    rdfs:label "belongs to group"@en ;
+    rdfs:comment "The merchandising group an item belongs to."@en .
+
+:belongsToCategory
+    a owl:ObjectProperty ; 
+    rdfs:domain :Group ; 
+    rdfs:range :Category ;
+    rdfs:label "belongs to category"@en ;
+    rdfs:comment "The broad category a group belongs to."@en .
+
+# Pricing relationships
+
+:forItem
+    a owl:ObjectProperty ;
+    rdfs:range :Item ;
+    rdfs:label "for item"@en ;
+    rdfs:comment "The item a price entry, promo price entry, or order line refers to."@en .
+
+:forPriceZone
+    a owl:ObjectProperty ; 
+    rdfs:range :PriceZone ;
+    rdfs:label "for price zone"@en ;
+    rdfs:comment "The price zone a price entry or promo price entry refers to."@en .
+
+:forPromo
+    a owl:ObjectProperty ; 
+    rdfs:range :Promo ;
+    rdfs:label "for promo"@en ;
+    rdfs:comment "The promo a promo price entry prices, or that an order line was bought under."@en .
+
+# Order relationships
+
+:placedBy
+    a owl:ObjectProperty ; 
+    rdfs:domain :Order ; 
+    rdfs:range :Customer ; 
+    rdfs:label "placed by"@en ;
+    rdfs:comment "The customer who placed the order."@en .
+
+:placedAt
+    a owl:ObjectProperty ; 
+    rdfs:domain :Order ; 
+    rdfs:range :Store ;
+    rdfs:label "placed at"@en ;
+    rdfs:comment "The store where the order was placed."@en .
+
+:hasOrderLine
+    a owl:ObjectProperty ; 
+    rdfs:domain :Order ; 
+    rdfs:range :OrderLine ;
+    rdfs:label "has order line"@en ;
+    rdfs:comment "One of the order lines that make up this order."@en .
+
+#-----------------------------------------------------------------------------     
+# Attributes (datatype properties)
+#-----------------------------------------------------------------------------     
+
+# Store
+
+:storeId
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Store ; 
+    rdfs:range xsd:string ; 
+    rdfs:label "store ID"@en .
+
+# Item
+
+:itemId
+    a owl:DatatypeProperty ;
+    rdfs:domain :Item ; 
+    rdfs:range xsd:string ;
+    rdfs:label "item ID"@en .
+
+:packSize
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Item ;
+    rdfs:range xsd:positiveInteger ;
+    rdfs:label "pack size"@en ;
+    rdfs:comment "Number of units of an item sold per pack."@en .
+
+# Pricing
+
+:regularPrice
+    a owl:DatatypeProperty ; 
+    rdfs:domain :PriceEntry ; 
+    rdfs:range xsd:decimal ;
+    rdfs:label "regular price"@en .
+
+:promoPrice
+    a owl:DatatypeProperty ;
+    rdfs:domain :PromoPriceEntry ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "promo price"@en .
+
+# Promo
+
+:promoId
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Promo ; 
+    rdfs:range xsd:string ; 
+    rdfs:label "promo ID"@en .
+
+:discountPercent
+    a owl:DatatypeProperty ; 
+    rdfs:domain :PercentOffPromo ;
+    rdfs:range xsd:decimal ; 
+    rdfs:label "discount percent"@en ;
+    rdfs:comment "The percentage taken off the regular price. Only meaningful for percent-off promos."@en .
+
+# Customers and orders
+
+:customerId
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Customer ; 
+    rdfs:range xsd:string ;
+    rdfs:label "customer ID"@en .
+
+:orderId
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Order ; 
+    rdfs:range xsd:string ; 
+    rdfs:label "order ID"@en .
+
+:orderDate
+    a owl:DatatypeProperty ; 
+    rdfs:domain :Order ; 
+    rdfs:range xsd:date ;
+    rdfs:label "order date"@en .
+
+:quantity
+    a owl:DatatypeProperty ; 
+    rdfs:domain :OrderLine ;
+    rdfs:range xsd:positiveInteger ; 
+    rdfs:label "quantity"@en ;
+    rdfs:comment "Number of units of the item bought on this order line."@en .
